@@ -28,7 +28,8 @@ asyncpg==0.29.0
 httpx==0.25.2
 
 # Supabase Storage
-supabase==2.3.4
+supabase==1.2.0
+storage3==0.5.3
 
 # Vercel Serverless Adapter
 mangum==0.17.0

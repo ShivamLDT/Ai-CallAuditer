@@ -6,7 +6,6 @@ import os
 import tempfile
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
-from supabase import create_client, Client
 
 
 class StorageService:
@@ -16,12 +15,14 @@ class StorageService:
     RETENTION_DAYS = 3
     
     def __init__(self):
-        self._client: Optional[Client] = None
+        self._client = None
     
     @property
-    def client(self) -> Client:
+    def client(self):
         """Lazy initialization of Supabase client"""
         if self._client is None:
+            from supabase import create_client
+            
             supabase_url = os.getenv("SUPABASE_URL")
             supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
             
@@ -99,7 +100,10 @@ class StorageService:
             path=storage_path,
             expires_in=expires_in
         )
-        return result["signedURL"]
+        # Handle both dict and object responses
+        if isinstance(result, dict):
+            return result.get("signedURL") or result.get("signedUrl", "")
+        return result.signed_url if hasattr(result, 'signed_url') else str(result)
     
     async def download_audio(self, storage_path: str) -> bytes:
         """
@@ -191,4 +195,3 @@ class StorageService:
 
 # Singleton instance
 storage_service = StorageService()
-
