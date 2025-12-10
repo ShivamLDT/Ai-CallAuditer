@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, String, Float, Integer, Boolean, DateTime, Text, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from datetime import datetime
 import os
 
@@ -8,8 +9,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./call_auditor.db")
 
 # Configure engine based on database type
 if DATABASE_URL.startswith("postgresql"):
-    # PostgreSQL (Supabase) configuration
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=5, max_overflow=10)
+    # PostgreSQL (Supabase) configuration - optimized for serverless
+    # NullPool is recommended for serverless (no connection pooling on app side)
+    # Supabase's PgBouncer handles pooling at port 6543
+    engine = create_engine(
+        DATABASE_URL,
+        poolclass=NullPool,  # Best for serverless - let Supabase handle pooling
+        pool_pre_ping=True,  # Verify connections are alive
+    )
 else:
     # SQLite configuration (for local development)
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -23,12 +30,12 @@ class CallAnalysis(Base):
     __tablename__ = "call_analyses"
 
     id = Column(String, primary_key=True, index=True)
-    call_date = Column(DateTime, default=datetime.utcnow)
+    call_date = Column(DateTime, default=datetime.utcnow, index=True)  # Indexed for fast queries
     audit_date = Column(DateTime, default=datetime.utcnow)
     duration_seconds = Column(Float)
     
     # Agent Info
-    agent_id = Column(String, nullable=True)
+    agent_id = Column(String, nullable=True, index=True)  # Indexed for agent filtering
     agent_name = Column(String, nullable=True)
     
     # Customer Info
