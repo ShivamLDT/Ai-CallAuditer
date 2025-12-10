@@ -1,6 +1,7 @@
 """
 Vercel Serverless Function Entry Point
 This file serves as the entry point for Vercel's Python runtime.
+Uses Mangum to adapt FastAPI (ASGI) for serverless environments.
 """
 import os
 import sys
@@ -17,6 +18,8 @@ load_dotenv()
 # Import the FastAPI app
 from app.main import app
 
-# Export for Vercel
-handler = app
+# Import Mangum for ASGI adapter
+from mangum import Mangum
 
+# Create the handler for Vercel
+handler = Mangum(app, lifespan="off")
