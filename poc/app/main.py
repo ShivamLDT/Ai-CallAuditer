@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-from .models.database import init_db
 from .routers import calls_router, dashboard_router
 
 # Initialize FastAPI app
@@ -39,12 +38,6 @@ templates = Jinja2Templates(directory=templates_path)
 # Include routers
 app.include_router(calls_router)
 app.include_router(dashboard_router)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup"""
-    init_db()
 
 
 @app.get("/")
