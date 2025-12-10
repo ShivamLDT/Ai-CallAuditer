@@ -1,7 +1,8 @@
 import os
 import uuid
-from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+import tempfile
+from datetime import datetime, timedelta
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Header
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
@@ -9,10 +10,12 @@ from ..models.database import get_db, CallAnalysis
 from ..models.schemas import CallAnalysisResult, CallType
 from ..services.transcription import transcription_service
 from ..services.sentiment_analysis import sentiment_service
+from ..services.storage import storage_service
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
 
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
+# Retention period for recordings (in days)
+RECORDING_RETENTION_DAYS = 3
 
 
 @router.post("/upload", response_model=CallAnalysisResult)
@@ -26,7 +29,8 @@ async def upload_and_analyze_call(
     db: Session = Depends(get_db)
 ):
     """
-    Upload a call recording, transcribe it using Whisper, and analyze sentiment using GPT-3.5
+    Upload a call recording, transcribe it using Whisper, and analyze sentiment using GPT-3.5.
+    Audio is stored in Supabase Storage and automatically expires after 3 days.
     """
     # Validate file type
     allowed_types = ["audio/mpeg", "audio/wav", "audio/mp3", "audio/m4a", "audio/webm", "audio/ogg"]
@@ -36,23 +40,32 @@ async def upload_and_analyze_call(
     # Generate unique call ID
     call_id = str(uuid.uuid4())
     
-    # Save uploaded file
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    file_extension = os.path.splitext(file.filename)[1] or ".mp3"
-    file_path = os.path.join(UPLOAD_DIR, f"{call_id}{file_extension}")
-    
+    # Read file content
     try:
-        contents = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(contents)
+        file_content = await file.read()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+    
+    # Save to temp file for Whisper API processing
+    file_extension = os.path.splitext(file.filename)[1] or ".mp3"
+    temp_fd, temp_path = tempfile.mkstemp(suffix=file_extension)
     
     try:
-        # Step 1: Transcribe using Whisper
-        transcription_result = await transcription_service.transcribe_audio(file_path)
+        # Write to temp file
+        with os.fdopen(temp_fd, 'wb') as f:
+            f.write(file_content)
         
-        # Step 2: Analyze using GPT-3.5
+        # Step 1: Upload to Supabase Storage
+        storage_path, expires_at = await storage_service.upload_audio(
+            file_content=file_content,
+            filename=file.filename,
+            call_id=call_id
+        )
+        
+        # Step 2: Transcribe using Whisper (from temp file)
+        transcription_result = await transcription_service.transcribe_audio(temp_path)
+        
+        # Step 3: Analyze using GPT-3.5
         analysis_result = await sentiment_service.analyze_call(transcription_result["text"])
         
         # Calculate total scores
@@ -110,7 +123,8 @@ async def upload_and_analyze_call(
             key_issues=result.key_issues,
             resolution_status=result.resolution_status,
             follow_up_required=result.follow_up_required,
-            audio_file_path=file_path
+            audio_storage_path=storage_path,
+            recording_expires_at=expires_at
         )
         db.add(db_record)
         db.commit()
@@ -118,10 +132,18 @@ async def upload_and_analyze_call(
         return result
         
     except Exception as e:
-        # Clean up file on error
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        # Clean up storage on error
+        try:
+            if 'storage_path' in locals():
+                await storage_service.delete_audio(storage_path)
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+    
+    finally:
+        # Always clean up temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 @router.get("/{call_id}", response_model=CallAnalysisResult)
@@ -159,6 +181,31 @@ async def get_call_analysis(call_id: str, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{call_id}/audio-url")
+async def get_audio_url(call_id: str, db: Session = Depends(get_db)):
+    """Get a signed URL for the call recording audio"""
+    record = db.query(CallAnalysis).filter(CallAnalysis.id == call_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Call not found")
+    
+    if not record.audio_storage_path:
+        raise HTTPException(status_code=404, detail="No audio recording available for this call")
+    
+    # Check if recording has expired
+    if record.recording_expires_at and record.recording_expires_at < datetime.utcnow():
+        raise HTTPException(status_code=410, detail="Recording has expired and been deleted")
+    
+    try:
+        # Get signed URL valid for 1 hour
+        signed_url = await storage_service.get_audio_url(record.audio_storage_path, expires_in=3600)
+        return {
+            "audio_url": signed_url,
+            "expires_at": record.recording_expires_at.isoformat() if record.recording_expires_at else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get audio URL: {str(e)}")
+
+
 @router.get("/", response_model=List[dict])
 async def list_calls(
     skip: int = 0,
@@ -176,23 +223,99 @@ async def list_calls(
         "duration": r.duration_seconds,
         "overall_score": r.overall_percentage,
         "sentiment": r.customer_sentiment.get("overall_sentiment", "Unknown") if r.customer_sentiment else "Unknown",
-        "resolution_status": r.resolution_status
+        "resolution_status": r.resolution_status,
+        "has_recording": bool(r.audio_storage_path),
+        "recording_expires_at": r.recording_expires_at.isoformat() if r.recording_expires_at else None
     } for r in records]
 
 
 @router.delete("/{call_id}")
 async def delete_call(call_id: str, db: Session = Depends(get_db)):
-    """Delete a call analysis record"""
+    """Delete a call analysis record and its associated audio recording"""
     record = db.query(CallAnalysis).filter(CallAnalysis.id == call_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Call not found")
     
-    # Delete audio file if exists
-    if record.audio_file_path and os.path.exists(record.audio_file_path):
-        os.remove(record.audio_file_path)
+    # Delete audio from Supabase Storage if exists
+    if record.audio_storage_path:
+        try:
+            await storage_service.delete_audio(record.audio_storage_path)
+        except Exception as e:
+            print(f"Warning: Could not delete audio file: {e}")
     
+    # Delete database record
     db.delete(record)
     db.commit()
     
     return {"message": "Call deleted successfully"}
 
+
+@router.delete("/{call_id}/recording")
+async def delete_recording_only(call_id: str, db: Session = Depends(get_db)):
+    """Delete only the audio recording, keeping the analysis data"""
+    record = db.query(CallAnalysis).filter(CallAnalysis.id == call_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Call not found")
+    
+    if not record.audio_storage_path:
+        raise HTTPException(status_code=404, detail="No recording to delete")
+    
+    # Delete from Supabase Storage
+    try:
+        await storage_service.delete_audio(record.audio_storage_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete recording: {str(e)}")
+    
+    # Update database record
+    record.audio_storage_path = None
+    record.recording_expires_at = None
+    db.commit()
+    
+    return {"message": "Recording deleted successfully"}
+
+
+@router.post("/cleanup-expired")
+async def cleanup_expired_recordings(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete all expired recordings. This endpoint is designed to be called by a cron job.
+    Protected by CRON_SECRET environment variable.
+    """
+    # Verify cron secret for security
+    cron_secret = os.getenv("CRON_SECRET")
+    if cron_secret:
+        if not authorization or authorization != f"Bearer {cron_secret}":
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Find all records with expired recordings
+    expired_records = db.query(CallAnalysis).filter(
+        CallAnalysis.recording_expires_at < datetime.utcnow(),
+        CallAnalysis.audio_storage_path.isnot(None)
+    ).all()
+    
+    deleted_count = 0
+    failed_count = 0
+    
+    for record in expired_records:
+        try:
+            # Delete from storage
+            await storage_service.delete_audio(record.audio_storage_path)
+            
+            # Clear storage path in database
+            record.audio_storage_path = None
+            record.recording_expires_at = None
+            deleted_count += 1
+        except Exception as e:
+            print(f"Failed to delete expired recording {record.id}: {e}")
+            failed_count += 1
+    
+    db.commit()
+    
+    return {
+        "message": "Cleanup completed",
+        "deleted": deleted_count,
+        "failed": failed_count,
+        "timestamp": datetime.utcnow().isoformat()
+    }

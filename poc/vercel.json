@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "runtime": "python3.11"
+      }
+    },
+    {
+      "src": "app/static/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/app/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/calls/cleanup-expired",
+      "schedule": "0 3 * * *"
+    }
+  ],
+  "env": {
+    "PYTHONUNBUFFERED": "1"
+  },
+  "functions": {
+    "api/index.py": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  }
+}
+

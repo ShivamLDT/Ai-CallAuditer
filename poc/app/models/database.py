@@ -57,8 +57,10 @@ class CallAnalysis(Base):
     resolution_status = Column(String)
     follow_up_required = Column(Boolean)
     
-    # File path
-    audio_file_path = Column(String, nullable=True)
+    # Audio Storage (Supabase Storage)
+    audio_file_path = Column(String, nullable=True)  # Legacy: local file path (deprecated)
+    audio_storage_path = Column(String, nullable=True)  # Supabase Storage path
+    recording_expires_at = Column(DateTime, nullable=True)  # Auto-deletion date
 
 
 def init_db():
@@ -71,4 +73,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

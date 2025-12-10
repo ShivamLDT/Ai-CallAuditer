@@ -70,3 +70,9 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "AI Call Quality Auditor"}
 
+
+@app.get("/api/health")
+async def api_health_check():
+    """API health check endpoint for Vercel"""
+    return {"status": "healthy", "service": "AI Call Quality Auditor", "version": "1.0.0"}
+

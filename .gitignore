@@ -1,15 +1,51 @@
+# Virtual Environment
 venv/
+.venv/
+env/
+
+# Environment Variables
 .env
+.env.local
+.env.production
+
+# IDE
 .DS_Store
 .idea/
 .vscode/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
+*.swp
+*.swo
+
+# Python Cache
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local Database (use Supabase in production)
+*.db
+*.sqlite
+*.sqlite3
+call_auditor.db
+
+# Uploads folder (use Supabase Storage in production)
+poc/uploads/
+uploads/
+
+# Vercel
+.vercel/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

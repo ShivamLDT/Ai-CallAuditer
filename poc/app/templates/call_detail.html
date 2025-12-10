@@ -3,15 +3,25 @@
 {% block title %}Call Analysis - AI Call Auditor{% endblock %}
 
 {% block content %}
-<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
     <div>
         <h1 class="page-title">Call Analysis Report</h1>
         <p class="page-subtitle" id="callId">Loading...</p>
     </div>
-    <a href="/" class="btn btn-secondary">
-        <i class="fas fa-arrow-left"></i>
-        Back to Dashboard
-    </a>
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button id="deleteRecordingBtn" class="btn btn-warning" style="display: none;" onclick="deleteRecording()">
+            <i class="fas fa-trash-alt"></i>
+            Delete Recording
+        </button>
+        <button id="deleteCallBtn" class="btn btn-danger" style="display: none;" onclick="deleteCall()">
+            <i class="fas fa-trash"></i>
+            Delete Call
+        </button>
+        <a href="/" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i>
+            Back to Dashboard
+        </a>
+    </div>
 </div>
 
 <div id="callContent">
@@ -20,11 +30,150 @@
         <div class="loading-text">Loading analysis...</div>
     </div>
 </div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">Confirm Delete</h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="modalMessage">Are you sure you want to delete this?</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button id="confirmDeleteBtn" class="btn btn-danger">Delete</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.btn-warning {
+    background: linear-gradient(135deg, #F59E0B, #D97706);
+    color: white;
+}
+.btn-warning:hover {
+    background: linear-gradient(135deg, #D97706, #B45309);
+    transform: translateY(-2px);
+}
+.btn-danger {
+    background: linear-gradient(135deg, #EF4444, #DC2626);
+    color: white;
+}
+.btn-danger:hover {
+    background: linear-gradient(135deg, #DC2626, #B91C1C);
+    transform: translateY(-2px);
+}
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+.modal-content {
+    background: var(--bg-card);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 400px;
+    border: 1px solid var(--border);
+    animation: modalSlideIn 0.2s ease-out;
+}
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.125rem;
+}
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.modal-close:hover {
+    color: var(--text-primary);
+}
+.modal-body {
+    padding: 1.5rem;
+}
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border);
+}
+.audio-player-card {
+    background: linear-gradient(135deg, var(--bg-secondary), var(--bg-card));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+}
+.audio-player-card h4 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.audio-player-card audio {
+    width: 100%;
+    height: 40px;
+    border-radius: 8px;
+}
+.recording-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.75rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.recording-expired {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #EF4444;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const callId = '{{ call_id }}';
+let currentCall = null;
 
 async function loadCallDetail() {
     try {
@@ -34,7 +183,14 @@ async function loadCallDetail() {
         }
         
         const call = await response.json();
+        currentCall = call;
         renderCallDetail(call);
+        
+        // Show action buttons
+        document.getElementById('deleteCallBtn').style.display = 'inline-flex';
+        
+        // Load audio player
+        loadAudioPlayer();
         
     } catch (error) {
         document.getElementById('callContent').innerHTML = `
@@ -49,6 +205,169 @@ async function loadCallDetail() {
         `;
     }
 }
+
+async function loadAudioPlayer() {
+    const audioContainer = document.getElementById('audioPlayerContainer');
+    if (!audioContainer) return;
+    
+    try {
+        const response = await fetch(`/api/calls/${callId}/audio-url`);
+        
+        if (response.status === 410) {
+            // Recording expired
+            audioContainer.innerHTML = `
+                <div class="recording-expired">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Recording has expired and been automatically deleted
+                </div>
+            `;
+            return;
+        }
+        
+        if (response.status === 404) {
+            // No recording available
+            audioContainer.innerHTML = `
+                <div style="color: var(--text-muted); font-size: 0.875rem; padding: 0.5rem 0;">
+                    <i class="fas fa-info-circle"></i> No audio recording available
+                </div>
+            `;
+            return;
+        }
+        
+        if (!response.ok) {
+            throw new Error('Failed to load audio');
+        }
+        
+        const data = await response.json();
+        
+        // Show delete recording button
+        document.getElementById('deleteRecordingBtn').style.display = 'inline-flex';
+        
+        // Calculate time remaining
+        let expiryInfo = '';
+        if (data.expires_at) {
+            const expiresAt = new Date(data.expires_at);
+            const now = new Date();
+            const hoursRemaining = Math.max(0, Math.round((expiresAt - now) / (1000 * 60 * 60)));
+            const daysRemaining = Math.floor(hoursRemaining / 24);
+            
+            if (daysRemaining > 0) {
+                expiryInfo = `Expires in ${daysRemaining} day${daysRemaining > 1 ? 's' : ''}`;
+            } else if (hoursRemaining > 0) {
+                expiryInfo = `Expires in ${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''}`;
+            } else {
+                expiryInfo = 'Expiring soon';
+            }
+        }
+        
+        audioContainer.innerHTML = `
+            <div class="audio-player-card">
+                <h4><i class="fas fa-headphones"></i> Call Recording</h4>
+                <audio controls preload="metadata">
+                    <source src="${data.audio_url}" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+                <div class="recording-info">
+                    <span><i class="fas fa-clock"></i> ${expiryInfo}</span>
+                    <button class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" onclick="deleteRecording()">
+                        <i class="fas fa-trash-alt"></i> Delete Recording
+                    </button>
+                </div>
+            </div>
+        `;
+        
+    } catch (error) {
+        audioContainer.innerHTML = `
+            <div style="color: var(--text-muted); font-size: 0.875rem; padding: 0.5rem 0;">
+                <i class="fas fa-exclamation-circle"></i> Could not load audio player
+            </div>
+        `;
+    }
+}
+
+function deleteRecording() {
+    document.getElementById('modalTitle').textContent = 'Delete Recording';
+    document.getElementById('modalMessage').textContent = 'Are you sure you want to delete the audio recording? The call analysis data will be preserved.';
+    document.getElementById('confirmDeleteBtn').onclick = confirmDeleteRecording;
+    document.getElementById('deleteModal').style.display = 'flex';
+}
+
+function deleteCall() {
+    document.getElementById('modalTitle').textContent = 'Delete Call';
+    document.getElementById('modalMessage').textContent = 'Are you sure you want to delete this call? This will permanently remove all analysis data and the recording.';
+    document.getElementById('confirmDeleteBtn').onclick = confirmDeleteCall;
+    document.getElementById('deleteModal').style.display = 'flex';
+}
+
+function closeModal() {
+    document.getElementById('deleteModal').style.display = 'none';
+}
+
+async function confirmDeleteRecording() {
+    const btn = document.getElementById('confirmDeleteBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+    
+    try {
+        const response = await fetch(`/api/calls/${callId}/recording`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete recording');
+        }
+        
+        closeModal();
+        
+        // Reload audio player section
+        document.getElementById('deleteRecordingBtn').style.display = 'none';
+        const audioContainer = document.getElementById('audioPlayerContainer');
+        if (audioContainer) {
+            audioContainer.innerHTML = `
+                <div style="color: var(--text-muted); font-size: 0.875rem; padding: 0.5rem 0;">
+                    <i class="fas fa-check-circle" style="color: #10B981;"></i> Recording deleted successfully
+                </div>
+            `;
+        }
+        
+    } catch (error) {
+        alert('Failed to delete recording: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Delete';
+    }
+}
+
+async function confirmDeleteCall() {
+    const btn = document.getElementById('confirmDeleteBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+    
+    try {
+        const response = await fetch(`/api/calls/${callId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete call');
+        }
+        
+        // Redirect to dashboard
+        window.location.href = '/';
+        
+    } catch (error) {
+        alert('Failed to delete call: ' + error.message);
+        btn.disabled = false;
+        btn.innerHTML = 'Delete';
+    }
+}
+
+// Close modal on outside click
+document.getElementById('deleteModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeModal();
+    }
+});
 
 function renderCallDetail(call) {
     document.getElementById('callId').textContent = `Call ID: ${call.call_id}`;
@@ -92,6 +411,9 @@ function renderCallDetail(call) {
                 <div class="stat-label">Escalation Risk</div>
             </div>
         </div>
+        
+        <!-- Audio Player Section -->
+        <div id="audioPlayerContainer"></div>
         
         <div class="detail-grid">
             <div>
@@ -289,6 +611,9 @@ function renderCallDetail(call) {
     // Render charts
     renderScoreChart(call.question_scores);
     renderSentimentGauge(call.customer_sentiment.escalation_risk);
+    
+    // Load audio player after content is rendered
+    loadAudioPlayer();
 }
 
 function renderScoreChart(scores) {
@@ -364,4 +689,3 @@ function renderSentimentGauge(escalationRisk) {
 document.addEventListener('DOMContentLoaded', loadCallDetail);
 </script>
 {% endblock %}
-
