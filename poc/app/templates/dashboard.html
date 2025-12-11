@@ -3,9 +3,15 @@
 {% block title %}Dashboard - AI Call Auditor{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Call Quality Dashboard</h1>
-    <p class="page-subtitle">Real-time analytics and insights for your call center operations</p>
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h1 class="page-title">Call Quality Dashboard</h1>
+        <p class="page-subtitle">Real-time analytics and insights for your call center operations</p>
+    </div>
+    <a href="/upload" class="btn btn-primary" style="font-size: 1rem; padding: 0.75rem 1.5rem;">
+        <i class="fas fa-plus"></i>
+        Upload New Call
+    </a>
 </div>
 
 <!-- Stats Grid -->
