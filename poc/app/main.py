@@ -52,6 +52,12 @@ async def upload_page(request: Request):
     return templates.TemplateResponse("upload.html", {"request": request})
 
 
+@app.get("/calls")
+async def calls_list_page(request: Request):
+    """Render the calls list page"""
+    return templates.TemplateResponse("calls_list.html", {"request": request})
+
+
 @app.get("/calls/{call_id}")
 async def call_detail_page(request: Request, call_id: str):
     """Render the call detail page"""

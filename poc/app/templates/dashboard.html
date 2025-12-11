@@ -14,37 +14,66 @@
     </a>
 </div>
 
-<!-- Stats Grid -->
+<!-- Stats Grid - Clickable Cards -->
 <div class="stats-grid" id="statsGrid">
-    <div class="stat-card fade-in">
+    <a href="/calls" class="stat-card fade-in clickable-card">
         <div class="stat-icon calls">
             <i class="fas fa-phone"></i>
         </div>
         <div class="stat-value" id="totalCalls">-</div>
         <div class="stat-label">Total Calls</div>
-    </div>
-    <div class="stat-card fade-in" style="animation-delay: 0.1s">
+        <div class="card-hint">Click to view all</div>
+    </a>
+    <a href="/calls" class="stat-card fade-in clickable-card" style="animation-delay: 0.1s">
         <div class="stat-icon score">
             <i class="fas fa-star"></i>
         </div>
         <div class="stat-value" id="avgScore">-</div>
         <div class="stat-label">Average Score</div>
-    </div>
-    <div class="stat-card fade-in" style="animation-delay: 0.2s">
+        <div class="card-hint">Click to view all</div>
+    </a>
+    <a href="/calls" class="stat-card fade-in clickable-card" style="animation-delay: 0.2s">
         <div class="stat-icon sentiment">
             <i class="fas fa-smile"></i>
         </div>
         <div class="stat-value" id="positiveRate">-</div>
         <div class="stat-label">Positive Sentiment</div>
-    </div>
-    <div class="stat-card fade-in" style="animation-delay: 0.3s">
+        <div class="card-hint">Click to view all</div>
+    </a>
+    <a href="/calls" class="stat-card fade-in clickable-card" style="animation-delay: 0.3s">
         <div class="stat-icon escalation">
             <i class="fas fa-exclamation-triangle"></i>
         </div>
         <div class="stat-value" id="escalationRate">-</div>
         <div class="stat-label">Escalation Risk</div>
-    </div>
+        <div class="card-hint">Click to view all</div>
+    </a>
 </div>
+
+<style>
+.clickable-card {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    position: relative;
+}
+.clickable-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+.card-hint {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.75rem;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.clickable-card:hover .card-hint {
+    opacity: 1;
+}
+</style>
 
 <!-- Charts Grid -->
 <div class="charts-grid">
@@ -95,6 +124,10 @@
 <div class="table-card fade-in" style="animation-delay: 1s">
     <div class="table-header">
         <h3 class="table-title">Recent Call Analyses</h3>
+        <a href="/calls" class="btn btn-secondary" style="margin-right: 0.5rem;">
+            <i class="fas fa-list"></i>
+            View All Calls
+        </a>
         <a href="/upload" class="btn btn-primary">
             <i class="fas fa-upload"></i>
             Upload New Call
@@ -142,39 +175,28 @@ const chartLayout = {
     margin: { t: 30, r: 30, b: 50, l: 60 }
 };
 
-// Fetch and render all data
+// OPTIMIZED: Single API call for all dashboard data
 async function loadDashboard() {
     try {
-        const [metrics, sentimentData, agentData, trendsData, categoryData, urgencyData, escalationData, calls] = await Promise.all([
-            fetch('/api/dashboard/metrics').then(r => r.json()),
-            fetch('/api/dashboard/charts/sentiment-pie').then(r => r.json()),
-            fetch('/api/dashboard/charts/agent-performance').then(r => r.json()),
-            fetch('/api/dashboard/charts/daily-trends').then(r => r.json()),
-            fetch('/api/dashboard/charts/category-scores').then(r => r.json()),
-            fetch('/api/dashboard/charts/urgency-distribution').then(r => r.json()),
-            fetch('/api/dashboard/charts/escalation-risk').then(r => r.json()),
-            fetch('/api/calls/').then(r => r.json())
-        ]);
+        // Single optimized API call instead of 8 separate calls
+        const data = await fetch('/api/dashboard/all-data').then(r => r.json());
         
         // Update stats
-        document.getElementById('totalCalls').textContent = metrics.total_calls;
-        document.getElementById('avgScore').textContent = metrics.avg_score.toFixed(1) + '%';
+        document.getElementById('totalCalls').textContent = data.metrics.total_calls;
+        document.getElementById('avgScore').textContent = data.metrics.avg_score.toFixed(1) + '%';
+        document.getElementById('positiveRate').textContent = data.metrics.positive_rate.toFixed(1) + '%';
+        document.getElementById('escalationRate').textContent = data.metrics.escalation_rate.toFixed(1) + '%';
         
-        const positiveCount = metrics.sentiment_distribution.Positive || 0;
-        const positiveRate = metrics.total_calls > 0 ? ((positiveCount / metrics.total_calls) * 100).toFixed(1) : 0;
-        document.getElementById('positiveRate').textContent = positiveRate + '%';
-        document.getElementById('escalationRate').textContent = metrics.escalation_rate.toFixed(1) + '%';
+        // Render charts using the combined data
+        renderSentimentPie(data.sentiment_pie);
+        renderUrgencyDonut(data.urgency_distribution);
+        renderAgentPerformance(data.agent_performance);
+        renderEscalationRisk(data.escalation_risk);
+        renderDailyTrends(data.daily_trends);
+        renderCategoryScores(data.category_scores);
         
-        // Render charts
-        renderSentimentPie(sentimentData);
-        renderUrgencyDonut(urgencyData);
-        renderAgentPerformance(agentData);
-        renderEscalationRisk(escalationData);
-        renderDailyTrends(trendsData);
-        renderCategoryScores(categoryData);
-        
-        // Render calls table
-        renderCallsTable(calls);
+        // Render recent calls table
+        renderCallsTable(data.recent_calls);
         
     } catch (error) {
         console.error('Failed to load dashboard:', error);
@@ -182,7 +204,12 @@ async function loadDashboard() {
 }
 
 function renderSentimentPie(data) {
-    const colors = ['#10B981', '#6B7280', '#EF4444', '#F59E0B'];
+    const colors = {
+        'Positive': '#10B981',
+        'Negative': '#EF4444',
+        'Neutral': '#6B7280',
+        'Mixed': '#F59E0B'
+    };
     
     Plotly.newPlot('sentimentPieChart', [{
         type: 'pie',
@@ -190,7 +217,7 @@ function renderSentimentPie(data) {
         labels: data.labels,
         hole: 0.4,
         marker: {
-            colors: data.labels.map(l => data.colors[l] || '#6B7280')
+            colors: data.labels.map(l => colors[l] || '#6B7280')
         },
         textinfo: 'label+percent',
         textposition: 'outside',
@@ -203,13 +230,19 @@ function renderSentimentPie(data) {
 }
 
 function renderUrgencyDonut(data) {
+    const colors = {
+        'High': '#EF4444',
+        'Medium': '#F59E0B',
+        'Low': '#10B981'
+    };
+    
     Plotly.newPlot('urgencyDonutChart', [{
         type: 'pie',
         values: data.values,
         labels: data.labels,
         hole: 0.5,
         marker: {
-            colors: data.labels.map(l => data.colors[l] || '#6B7280')
+            colors: data.labels.map(l => colors[l] || '#6B7280')
         },
         textinfo: 'label+percent',
         textposition: 'outside',
@@ -230,6 +263,11 @@ function renderUrgencyDonut(data) {
 
 function renderAgentPerformance(data) {
     const agents = data.slice(0, 10);
+    
+    if (agents.length === 0) {
+        document.getElementById('agentPerformanceChart').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">No agent data available</div>';
+        return;
+    }
     
     Plotly.newPlot('agentPerformanceChart', [{
         type: 'bar',
@@ -258,13 +296,13 @@ function renderAgentPerformance(data) {
 }
 
 function renderEscalationRisk(data) {
+    const colors = ['#10B981', '#84CC16', '#F59E0B', '#F97316', '#EF4444'];
+    
     Plotly.newPlot('escalationChart', [{
         type: 'bar',
         x: data.labels,
         y: data.values,
-        marker: {
-            color: data.colors
-        },
+        marker: { color: colors },
         text: data.values,
         textposition: 'outside',
         textfont: { color: '#f8fafc' },
@@ -283,6 +321,11 @@ function renderEscalationRisk(data) {
 }
 
 function renderDailyTrends(data) {
+    if (!data.dates || data.dates.length === 0) {
+        document.getElementById('dailyTrendsChart').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">No trend data available</div>';
+        return;
+    }
+    
     Plotly.newPlot('dailyTrendsChart', [
         {
             type: 'scatter',
@@ -333,6 +376,11 @@ function renderDailyTrends(data) {
 }
 
 function renderCategoryScores(data) {
+    if (!data || data.length === 0) {
+        document.getElementById('categoryScoresChart').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">No category data available</div>';
+        return;
+    }
+    
     Plotly.newPlot('categoryScoresChart', [{
         type: 'bar',
         orientation: 'h',
@@ -366,7 +414,7 @@ function renderCategoryScores(data) {
 function renderCallsTable(calls) {
     const tbody = document.getElementById('callsTableBody');
     
-    if (calls.length === 0) {
+    if (!calls || calls.length === 0) {
         return;
     }
     
@@ -374,18 +422,18 @@ function renderCallsTable(calls) {
         <tr>
             <td>${call.agent_name || 'Unknown'}</td>
             <td>${call.customer_name || 'Unknown'}</td>
-            <td>${new Date(call.call_date).toLocaleDateString()}</td>
+            <td>${call.call_date ? new Date(call.call_date).toLocaleDateString() : 'N/A'}</td>
             <td>${Math.round(call.duration || 0)}s</td>
             <td>
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
                     <div class="progress-bar">
-                        <div class="progress-fill ${call.overall_score >= 80 ? 'high' : call.overall_score >= 60 ? 'medium' : 'low'}" 
-                             style="width: ${call.overall_score}%"></div>
+                        <div class="progress-fill ${(call.overall_score || 0) >= 80 ? 'high' : (call.overall_score || 0) >= 60 ? 'medium' : 'low'}" 
+                             style="width: ${call.overall_score || 0}%"></div>
                     </div>
-                    <span>${call.overall_score.toFixed(1)}%</span>
+                    <span>${(call.overall_score || 0).toFixed(1)}%</span>
                 </div>
             </td>
-            <td><span class="badge ${call.sentiment.toLowerCase()}">${call.sentiment}</span></td>
+            <td><span class="badge ${(call.sentiment || 'neutral').toLowerCase()}">${call.sentiment || 'Unknown'}</span></td>
             <td>${call.resolution_status || '-'}</td>
             <td>
                 <a href="/calls/${call.id}" class="btn btn-secondary" style="padding: 0.5rem 0.75rem; font-size: 0.75rem;">
@@ -400,4 +448,3 @@ function renderCallsTable(calls) {
 document.addEventListener('DOMContentLoaded', loadDashboard);
 </script>
 {% endblock %}
-
