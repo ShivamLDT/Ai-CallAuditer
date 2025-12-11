@@ -197,21 +197,44 @@ class AsyncSentimentAnalysisService:
     # ---------------------
     def _safe_json_loads(self, text: str) -> Any:
         """Try to parse JSON robustly; if invalid, attempt to extract JSON substring, else raise."""
-        if not text:
+        if not text or text.strip() == "":
             raise ValueError("Empty response content")
+        
+        text = text.strip()
+        
+        # Remove markdown code blocks if present
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            text = text.strip()
+        
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # try to find first "{" and last "}" and parse substring
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end != -1 and end > start:
+            # Try to find JSON object {...}
+            obj_start = text.find("{")
+            obj_end = text.rfind("}")
+            
+            # Try to find JSON array [...]
+            arr_start = text.find("[")
+            arr_end = text.rfind("]")
+            
+            # Determine which comes first and is valid
+            candidates = []
+            if obj_start != -1 and obj_end != -1 and obj_end > obj_start:
+                candidates.append((obj_start, obj_end, "{"))
+            if arr_start != -1 and arr_end != -1 and arr_end > arr_start:
+                candidates.append((arr_start, arr_end, "["))
+            
+            # Sort by start position and try each
+            for start, end, _ in sorted(candidates, key=lambda x: x[0]):
                 substring = text[start : end + 1]
                 try:
                     return json.loads(substring)
                 except json.JSONDecodeError:
-                    logger.debug("Failed parsing JSON substring")
-            # As last resort, raise
+                    continue
+            
+            logger.debug("Failed parsing JSON from response: %s", text[:200])
             raise
 
     # ---------------------
@@ -426,8 +449,13 @@ Return ONLY valid JSON array, no other text.
             {"role": "user", "content": prompt},
         ]
         try:
-            resp = await self._call_chat_completion(messages, timeout=self.request_timeout)
-            content = getattr(resp.choices[0].message, "content", None) or str(resp)
+            # Questionnaire needs more tokens (20 questions with detailed responses)
+            resp = await self._call_chat_completion(messages, timeout=30.0, max_tokens=2500)
+            content = getattr(resp.choices[0].message, "content", None) or ""
+            
+            # Log if content seems problematic
+            if not content or len(content) < 10:
+                logger.warning("Questionnaire got short/empty response: %s", repr(content))
             results = self._safe_json_loads(content)
             output = []
             for r in results:
